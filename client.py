@@ -40,20 +40,19 @@ def encrypt(key,data):
         ct_bytes = cipher.encrypt(pad(data, AES.block_size))
         iv = b64encode(cipher.iv).decode('utf-8')
         ct = b64encode(ct_bytes).decode('utf-8')
-        json_input = json.dumps({'iv':iv, 'ciphertext':ct})
-        print(json_input) 
+        json_input = json.dumps({'iv':iv, 'ciphertext':ct}) 
         return json_input
-def decrypt(secret,json_input):
+def decrypt(key,json_input):
         try:
                 b64 = json.loads(json_input)
                 iv = b64decode(b64['iv'])
                 ct = b64decode(b64['ciphertext'])
                 cipher = AES.new(key, AES.MODE_CBC, iv)
                 pt = unpad(cipher.decrypt(ct), AES.block_size)
-                print("The message was: ", pt)
         except (ValueError, KeyError):
                 print("Incorrect decryption")
-        return pt
+                pt = ""
+        return pt.decode()
 
 
 def chat_client():
@@ -101,9 +100,9 @@ def chat_client():
             else :
 
                 msg = sys.stdin.readline()
-                msg = '[ '+ uname +': ] '+msg
+                # msg = '[ '+ uname +': ] '+msg
                 msg = encrypt(key,msg.encode("UTF-8"))
-                s.send(msg.encode("UTF-8"))
+                s.send(msg.encode())
                 sys.stdout.write("\033[34m"+'\n[local] #  '+ "\033[0m"); sys.stdout.flush()
 
 if __name__ == "__main__":

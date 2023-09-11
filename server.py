@@ -1,130 +1,86 @@
-#server side / host
-import configparser
-import base64
-import sys, socket, select
-from Crypto.Cipher import AES
-import hashlib
-import os
-import signal
+#!/usr/bin/env python3
 
-os.system("clear")
-print("""
+import socketserver
+import sys
+import threading
 
-	 ____  ____  ____   __   _  _      __  ____   ___ 
-	(    \(  _ \(  __) / _\ ( \/ ) ___(  )(  _ \ / __)
-	 ) D ( )   / ) _) /    \/ \/ \(___))(  )   /( (__ 
-	(____/(__\_)(____)\_/\_/\_)(_/    (__)(__\_) \___)
+# usage: ./server.py [PORT] [HOST]
+
+CLIENTS = []
 
 
-		    Secure IRC by DreamSec
-		       dreambooter.xyz
-
-""")
-
-def sigint_handler(signum, frame):
-    print('\n[error] user interupt')
-    print("[info] shutting down DREAM-IRC \n\n")
-    sys.exit()	
-
-signal.signal(signal.SIGINT, sigint_handler)
-
-def hasher(key):
-	hash_object = ""
-	hash_object = hashlib.sha512(key.encode('utf-8'))
-	hexd = hash_object.hexdigest()
-	hash_object = hashlib.md5(hexd.encode('utf-8'))
-	hex_dig = hash_object.hexdigest()
-	return hex_dig	
-
-def encrypt(key,data):
-        cipher = AES.new(key, AES.MODE_CBC)
-        ct_bytes = cipher.encrypt(pad(data, AES.block_size))
-        iv = b64encode(cipher.iv).decode('utf-8')
-        ct = b64encode(ct_bytes).decode('utf-8')
-        json_input = json.dumps({'iv':iv, 'ciphertext':ct})
-        print(json_input)
-        return json_input
-
-def decrypt(secret,json_input):
-        try:
-                b64 = json.loads(json_input)
-                iv = b64decode(b64['iv'])
-                ct = b64decode(b64['ciphertext'])
-                cipher = AES.new(key, AES.MODE_CBC, iv)
-                pt = unpad(cipher.decrypt(ct), AES.block_size)
-                print("The message was: ", pt)
-        except (ValueError, KeyError):
-                print("Incorrect decryption")
-        return pt
-
-config = configparser.RawConfigParser()   
-config.read(r'dream.conf')
-
-HOST = config.get('config', 'HOST')
-PORT = int(config.get('config', 'PORT'))
-PASSWORD = config.get('config', 'PASSWORD')
-VIEW = str(config.get('config', 'VIEW'))
-key = hasher(PASSWORD)
-SOCKET_LIST = []
-RECV_BUFFER = 4096
+class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+	pass
 
 
-def chat_server():
+class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
 
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind((HOST, PORT))
-    server_socket.listen(10)
+	# Class is instantiated once per connection to the server
 
-    SOCKET_LIST.append(server_socket)
+	def handle(self):
+		CLIENTS.append(self.request)
+		welcomeMsg = self.client_address[0] + ":" + str(self.client_address[1]) + " joined." + '\n'
+		sys.stdout.write(welcomeMsg)
+		sys.stdout.flush()
+		#for cli in CLIENTS:
+			#if cli is not self.request:
+				#cli.sendall(welcomeMsg.encode())
+		while True:
+			data = self.request.recv(4096)
+			if data:
+				data = data.decode()
+				# sendMsg = self.client_address[0] + ":" + str(self.client_address[1]) + "> " + data
+				sendMsg = data
+				sys.stdout.write(sendMsg)
+				sys.stdout.flush()
+				for cli in CLIENTS:
+					if cli is not self.request:
+						cli.sendall(sendMsg.encode())
+			else:
+				sendMsg = self.client_address[0] + ":" + str(self.client_address[1]) + " left." + '\n'
+				sys.stdout.write(sendMsg)
+				sys.stdout.flush()
+				CLIENTS.remove(self.request)
+				# for cli in CLIENTS:
+					# cli.sendall(sendMsg.encode())
+				break
 
-    print("[Server] Started on port " + str(PORT))
-
-    while 1:
-
-        ready_to_read,ready_to_write,in_error = select.select(SOCKET_LIST,[],[],0)
-
-        for sock in ready_to_read:
-
-            if sock == server_socket:
-                sockfd, addr = server_socket.accept()
-                SOCKET_LIST.append(sockfd)
-                print("[Server] User [(%s, %s)] connected" % addr)
-            else:
-                try:
-                    data = sock.recv(RECV_BUFFER)
-                    data = decrypt(key,data)
-                    if data:
-
-                        broadcast(server_socket, sock,encrypt(key,"\r" + data))
-                        if VIEW == '1':
-                          print(data)
-                    else:
-
-                        if sock in SOCKET_LIST:
-                            SOCKET_LIST.remove(sock)
-
-                        broadcast(server_socket, sock,encrypt(key,"[Server] [(%s, %s)] Has left the server.\n" % addr))
-
-                except:
-                    broadcast(server_socket, sock, "[Server] User [(%s, %s)] is offline\n" % addr)
-                    continue
-
-    server_socket.close()
-
-def broadcast (server_socket, sock, message):
-    for socket in SOCKET_LIST:
-
-        if socket != server_socket and socket != sock :
-            try :
-                socket.send(message)
-            except :
-
-                socket.close()
-
-                if socket in SOCKET_LIST:
-                    SOCKET_LIST.remove(socket)
 
 if __name__ == "__main__":
 
-    sys.exit(chat_server())
+	if len(sys.argv) == 1:
+		HOST = ("localhost", 10000)
+	elif len(sys.argv) == 2:
+		HOST = ("localhost", int(sys.argv[1]))
+	else:
+		HOST = (sys.argv[2], int(sys.argv[1]))
+
+	server = ThreadedTCPServer(HOST, ThreadedTCPRequestHandler)
+	server.daemon_threads = True
+
+	server_thread = threading.Thread(target=server.serve_forever)
+
+	# Exit the server thread when the main thread terminates
+	server_thread.daemon = True
+	server_thread.start()
+
+	sys.stdout.write("Server is up." + '\n')
+	sys.stdout.flush()
+
+	# Main execution will push
+	while True:
+		try:
+			msg = sys.stdin.readline()
+			msg = "Server> " + msg
+			sys.stdout.write(msg)
+			sys.stdout.flush()
+			for client in CLIENTS:
+				client.sendall(msg.encode())
+
+		except KeyboardInterrupt:
+			break
+
+	server.shutdown()
+	server.server_close()
+	sys.stdout.write("Server is closed." + '\n')
+	sys.stdout.flush()
